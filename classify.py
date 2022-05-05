@@ -12,7 +12,7 @@ class Predictor:
     def __init__(self):
         self.model_path = str(sys.argv[1])
         self.dir = str(sys.argv[2])
-        self.classes = ['1-1', '1-12', '1-18', '1-3', '2-1', '2-10', '2-17']
+        self.classes = ['1-1', '1-3', '1-12', '1-18', '2-10', '2-17']
         self.dataset = tf.data.Dataset.list_files(f"{self.dir}/*.png")
         self.img_size = (50, 50)
         self.model = None
@@ -33,23 +33,26 @@ class Predictor:
     def load_data(self):
         """Read in the data from the directory.
         Convert to tensorflow format."""
+        print("loading data")
         for image in os.listdir(self.dir):
             if ".png" in image:
                 image_path = os.path.join(self.dir, image)
+                # print(image_path)
                 self.image_paths.append(image)
                 image = tf.keras.preprocessing.image.load_img(image_path,
                                                               color_mode='grayscale',
                                                               target_size=self.img_size)
                 image_arr = tf.keras.preprocessing.image.img_to_array(image)
-                plt.imshow(image_arr,  cmap=plt.get_cmap('gray'))
-                plt.show()
+                image_arr = tf.image.grayscale_to_rgb(tf.convert_to_tensor(image_arr)).numpy()
+                # plt.imshow(image_arr,  cmap=plt.get_cmap('gray'))
+                # plt.show()
                 self.image_arrays.append(image_arr)
 
         self.image_arrays = np.array(self.image_arrays)
-        pass
+        print("loaded data")
 
     def predict(self):
-        self.predictions = self.model.predict(self.image_arrays)
+        self.predictions = np.argmax(self.model.predict(self.image_arrays), axis=1)
         print(self.predictions)
 
     def output(self):
@@ -57,7 +60,6 @@ class Predictor:
             os.makedirs(f"{self.dir}/{class_name}", exist_ok=True)
 
         for index, val in enumerate(self.predictions):
-            val = np.argmax(val)
             print(f"{self.image_paths[index]}: {val}")
             shutil.move(f"{self.dir}/{self.image_paths[index]}",
                         f"{self.dir}/{self.classes[val]}/{self.image_paths[index]}")

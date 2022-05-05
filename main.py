@@ -3,7 +3,7 @@
 # Press ⌃R to execute it or replace it with your code.
 # Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
 import math
-
+import random
 # import pandas as pd
 import os
 import time
@@ -45,27 +45,27 @@ class DataSetProp:
     def __init__(self):
         self.files = None
         self.total = 0
-        self.training = 0
+        self.train = 0
         self.validation = 0
         
 
 class Classifier:
 
-    def __init__(self, should_preprocess=False, data_dir="./tmp",
+    def __init__(self, should_preprocess=False, data_dir='./tmp',
                  load_path=None) -> None:
         self.should_preprocess = should_preprocess
-        self.classes = ["1-3", "1-4", "2-2", "2-17", '2-17-cell-tak']
+        self.classes = ['1-1', '1-3', '1-12', '1-18', '2-10', '2-17']
         self.count = {
-            class_name : DataSetProp()
+            class_name: DataSetProp()
             for class_name in self.classes
         }
-        self.epochs = 15
+        self.epochs = 20
         self.dirs = {
             "data": data_dir,
             "train": './tmp/train', "validation": "./tmp/validation",
             "test": "./tmp/test"
         }
-        self.process_types = ["training", "validation", "test"]
+        self.process_types = ["train", "validation", "test"]
         # self.data_frames = {}
         self.generators = {}
         self.datasets = {}
@@ -95,12 +95,13 @@ class Classifier:
             _, _, files = next(os.walk(f"{self.dirs['data']}/{which_type}"))
             self.count[which_type].total = len(files)
             self.count[which_type].files = files
+            random.shuffle(self.count[which_type].files)
 
         for which_type in self.classes:
-            self.count[which_type].training = math.floor(
+            self.count[which_type].train = math.floor(
                 self.count[which_type].total * 0.7)
             self.count[which_type].validation = math.floor(
-                self.count[which_type].total * 0) + self.count[which_type].training
+                self.count[which_type].total * 0.2) + self.count[which_type].train
 
         for idx, files in enumerate([
             self.count[class_name].files
@@ -108,38 +109,51 @@ class Classifier:
         ]):
             which_sub_dir = self.classes[idx]
             for i, file in enumerate(files):
-                if i <= self.count[which_sub_dir].training:
-                    shutil.copyfile(f"{self.dirs['data']}/{which_sub_dir}/{file}",
+                src = f"{self.dirs['data']}/{which_sub_dir}/{file}"
+                if i <= self.count[which_sub_dir].train:
+                    shutil.copyfile(src,
                                     f"{prefix}{'train'}/{which_sub_dir}/{file}")
                 elif i <= self.count[which_sub_dir].validation:
-                    shutil.copyfile(f"{self.dirs['data']}/{which_sub_dir}/{file}",
+                    shutil.copyfile(src,
                                     f"{prefix}{'validation'}/{which_sub_dir}/{file}")
                 else:
-                    shutil.copyfile(f"{self.dirs['data']}/{which_sub_dir}/{file}",
+                    shutil.copyfile(src,
                                     f"{prefix}{'test'}/{which_sub_dir}/{file}")
 
     def generate_datasets(self):
-        self.datasets["training"] = tf.keras.preprocessing.\
-                image_dataset_from_directory(f"{self.dirs['data']}/training",
-                    validation_split=0.2,
-                    subset="training",
+        self.datasets["train"] = tf.keras.preprocessing.\
+                image_dataset_from_directory(f"{self.dirs['data']}/train",
+                    # validation_split=0.2,
+                    # subset="training",
                     label_mode='categorical',
                     seed=123, color_mode='rgb',
-                    image_size=(100, 100),
+                    image_size=(50, 50),
                     batch_size=32)
+        self.datasets["validation"] = tf.keras.preprocessing. \
+            image_dataset_from_directory(f"{self.dirs['data']}/validation",
+                                         # validation_split=0.2,
+                                         # subset="training",
+                                         labels='inferred',
+                                         label_mode='categorical',
+                                         seed=123, color_mode='rgb',
+                                         shuffle='False',
+                                         image_size=(50, 50),
+                                         batch_size=32)
         self.datasets["test"] = tf.keras.preprocessing. \
             image_dataset_from_directory(f"{self.dirs['data']}/test",
                                          seed=123, color_mode='rgb',
+                                         labels='inferred',
                                          label_mode='categorical',
-                                         image_size=(100, 100),
+                                         shuffle='False',
+                                         image_size=(50, 50),
                                          batch_size=32)
 
     def visualize_data(self):
         """Display some sample images."""
-        class_names = self.datasets['training'].class_names
+        class_names = self.datasets['train'].class_names
         plt.figure(figsize=(10, 10))
-        for images, labels in self.datasets['training'].take(1):
-            for i in range(5):
+        for images, labels in self.datasets['train'].take(1):
+            for i in range(6):
                 ax = plt.subplot(3, 3, i + 1)
                 plt.imshow(images[i].numpy().astype("uint8"))
                 plt.title(class_names[numpy.nonzero(labels[i])[0][0]])
@@ -165,15 +179,15 @@ class Classifier:
     #     pass
 
     def create_model(self):
-        IMG_SHAPE = (100, 100, 3)
-        base_model = tf.keras.applications.resnet50.ResNet50(
+        IMG_SHAPE = (50, 50, 3)
+        self.base_model = tf.keras.applications.resnet50.ResNet50(
             input_shape=IMG_SHAPE,include_top=False,weights='imagenet')
-        base_model.trainable = False
-        base_model.summary()
-        prediction_layer = tf.keras.layers.Dense(5)
+        self.base_model.trainable = False
+        self.base_model.summary()
+        prediction_layer = tf.keras.layers.Dense(len(self.classes))
         global_average_layer = tf.keras.layers.GlobalAveragePooling2D()
         self.model = tf.keras.Sequential([
-            base_model,
+            self.base_model,
             global_average_layer,
             prediction_layer
         ])
@@ -210,8 +224,8 @@ class Classifier:
         #     tf.keras.layers.Dense(512, activation="relu"),
         #     # Only 1 output neuron. It will contain a value from 0-1 where 0 for 1 class ('dandelions') and 1 for the other ('grass')
         #     tf.keras.layers.Dense(len(self.classes), activation='softmax')])
-        base_learning_rate = 0.0001
-        self.model.compile(optimizer=tf.keras.optimizers.RMSprop(lr=base_learning_rate),
+        self.base_learning_rate = 0.0002
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.base_learning_rate),
                            loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
                            metrics=['accuracy'])
 
@@ -227,35 +241,64 @@ class Classifier:
         #     objective='val_loss',
         #     max_trials=5)
 
-        self.history = self.model.fit(self.datasets['training'],
+        self.history = self.model.fit(self.datasets['train'],
                                       epochs=self.epochs,
                                       verbose=1,
+                                      validation_data=self.datasets[
+                                          'validation']
                                       # validation_data=self.datasets[
                                       #     'validation'],
                                       # validation_steps=8
                                       )
 
+        self.base_model.trainable = True
+        self.fine_tune_epochs = 8
+
+        # Fine-tune from this layer onwards
+        # fine_tune_at = 50
+        # Freeze all the layers before the `fine_tune_at` layer
+        # for layer in self.base_model.layers[:fine_tune_at]:
+        #     layer.trainable = False
+
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(
+            learning_rate=self.base_learning_rate / 10),
+                           loss=tf.keras.losses.BinaryCrossentropy(
+                               from_logits=True),
+                           metrics=['accuracy'])
+        total_epochs = self.epochs + self.fine_tune_epochs
+
+        self.history_fine = self.model.fit(self.datasets['train'],
+                                 epochs=total_epochs,
+                                 initial_epoch=self.history.epoch[-1],
+                                 validation_data=self.datasets['validation'])
+
     def visualize_training_result(self):
         acc = self.history.history['accuracy']
-        # val_acc = self.history.history['val_accuracy']
+        acc += self.history_fine.history['accuracy']
+        val_acc = self.history.history['val_accuracy']
+        val_acc += self.history_fine.history['val_accuracy']
 
         loss = self.history.history['loss']
-        # val_loss = self.history.history['val_loss']
+        loss += self.history_fine.history['loss']
+        val_loss = self.history.history['val_loss']
+        val_loss += self.history_fine.history['val_loss']
 
-        epochs_range = range(self.epochs)
+        epochs_range = range(len(acc))
 
         plt.figure(figsize=(8, 8))
         plt.subplot(1, 2, 1)
-        plt.plot(epochs_range, acc, label='Training Accuracy')
+        plt.plot(epochs_range, acc, label='train Accuracy')
+        plt.plot(epochs_range, val_acc, label='Validation Accuracy')
         # plt.plot(epochs_range, val_acc, label='Validation Accuracy')
         plt.legend(loc='lower right')
-        plt.title('Training and Validation Accuracy')
+        plt.title('train and Validation Accuracy')
 
         plt.subplot(1, 2, 2)
-        plt.plot(epochs_range, loss, label='Training Loss')
+        plt.plot(epochs_range, loss, label='train Loss')
+        plt.plot(epochs_range, val_loss, label='Validation Accuracy')
         # plt.plot(epochs_range, val_loss, label='Validation Loss')
         plt.legend(loc='upper right')
-        plt.title('Training and Validation Loss')
+        plt.title('train and Validation Loss')
         plt.show()
 
     # def draw_roc_curve(self):
@@ -344,6 +387,7 @@ class Classifier:
 
     def save(self):
         if self.load_path is None:
+            print(f"Saving model at {self.save_path}")
             os.makedirs(self.save_path)
             self.model.save(self.save_path)
             self.plot_model()
@@ -387,6 +431,6 @@ class Classifier:
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # saved_model_path = str(sys.argv[1])
-    classifier = Classifier(should_preprocess=False)
+    classifier = Classifier(should_preprocess=True)
     classifier.run()
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
